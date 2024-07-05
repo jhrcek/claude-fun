@@ -66,15 +66,23 @@ view : Model -> Html Msg
 view model =
     Html.div []
         [ Html.h1 [] [ Html.text "Function Mapping App" ]
-        , Html.div []
-            [ Html.label [] [ Html.text "n (domain size): " ]
-            , Html.input [ A.type_ "number", A.value (String.fromInt model.n), E.onInput UpdateN ] []
-            ]
-        , Html.div []
-            [ Html.label [] [ Html.text "m (codomain size): " ]
-            , Html.input [ A.type_ "number", A.value (String.fromInt model.m), E.onInput UpdateM ] []
-            ]
+        , setSizeInput "n (domain size): " model.n UpdateN
+        , setSizeInput "m (codomain size): " model.m UpdateM
         , Html.div [] (List.indexedMap (viewMapping model) (Array.toList model.mappings))
+        ]
+
+
+setSizeInput : String -> Int -> (String -> Msg) -> Html Msg
+setSizeInput label value toMsg =
+    Html.div []
+        [ Html.label [] [ Html.text label ]
+        , Html.input
+            [ A.type_ "number"
+            , A.min "0"
+            , A.max "10"
+            , A.value (String.fromInt value)
+            , E.onInput toMsg
+            ] []
         ]
 
 
