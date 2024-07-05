@@ -5,14 +5,16 @@ import Browser
 import Html exposing (Html)
 import Html.Attributes as A
 import Html.Events as E
+import Random
 
 
 main : Program () Model Msg
 main =
-    Browser.sandbox
+    Browser.element
         { init = init
         , update = update
         , view = view
+        , subscriptions = always Sub.none
         }
 
 
@@ -23,21 +25,25 @@ type alias Model =
     }
 
 
-init : Model
-init =
-    { n = 0
-    , m = 0
-    , mappings = Array.empty
-    }
+init : () -> ( Model, Cmd Msg )
+init _ =
+    ( { n = 1
+      , m = 1
+      , mappings = Array.empty
+      }
+    , Cmd.none
+    )
 
 
 type Msg
     = UpdateN String
     | UpdateM String
     | UpdateMapping Int String
+    | GenerateRandom
+    | NewRandomMapping (List Int)
 
 
-update : Msg -> Model -> Model
+update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
         UpdateN nStr ->
@@ -45,21 +51,29 @@ update msg model =
                 newN =
                     Maybe.withDefault 0 (String.toInt nStr)
             in
-            { model | n = newN, mappings = Array.repeat newN 1 }
+            ( { model | n = newN, mappings = Array.repeat newN 1 }, Cmd.none )
 
         UpdateM mStr ->
             let
                 newM =
                     Maybe.withDefault 0 (String.toInt mStr)
             in
-            { model | m = newM }
+            ( { model | m = newM }, Cmd.none )
 
         UpdateMapping index valueStr ->
             let
                 value =
                     Maybe.withDefault 1 (String.toInt valueStr)
             in
-            { model | mappings = Array.set index value model.mappings }
+            ( { model | mappings = Array.set index value model.mappings }, Cmd.none )
+
+        GenerateRandom ->
+            ( model
+            , Random.generate NewRandomMapping (Random.list model.n (Random.int 1 model.m))
+            )
+
+        NewRandomMapping randomList ->
+            ( { model | mappings = Array.fromList randomList }, Cmd.none )
 
 
 view : Model -> Html Msg
@@ -68,6 +82,7 @@ view model =
         [ Html.h1 [] [ Html.text "Function Mapping App" ]
         , setSizeInput "n (domain size): " model.n UpdateN
         , setSizeInput "m (codomain size): " model.m UpdateM
+        , Html.button [ E.onClick GenerateRandom ] [ Html.text "Random" ]
         , Html.div [] (List.indexedMap (viewMapping model) (Array.toList model.mappings))
         ]
 
@@ -82,7 +97,8 @@ setSizeInput label value toMsg =
             , A.max "10"
             , A.value (String.fromInt value)
             , E.onInput toMsg
-            ] []
+            ]
+            []
         ]
 
 
