@@ -6,6 +6,8 @@ import Html exposing (Html)
 import Html.Attributes as A
 import Html.Events as E
 import Random
+import Svg exposing (Svg)
+import Svg.Attributes as SA
 
 
 main : Program () Model Msg
@@ -29,7 +31,7 @@ init : () -> ( Model, Cmd Msg )
 init _ =
     ( { n = 1
       , m = 1
-      , mappings = Array.empty
+      , mappings = Array.repeat 1 1
       }
     , Cmd.none
     )
@@ -84,6 +86,7 @@ view model =
         , setSizeInput "m (codomain size): " model.m UpdateM
         , Html.button [ E.onClick GenerateRandom ] [ Html.text "Random" ]
         , Html.div [] (List.indexedMap (viewMapping model) (Array.toList model.mappings))
+        , viewSvgMapping model
         ]
 
 
@@ -115,3 +118,80 @@ viewOption : Int -> Int -> Html msg
 viewOption selected value =
     Html.option [ A.value (String.fromInt value), A.selected (value == selected) ]
         [ Html.text (String.fromInt value) ]
+
+
+viewSvgMapping : Model -> Html Msg
+viewSvgMapping model =
+    let
+        svgWidth =
+            300
+
+        svgHeight =
+            max model.n model.m * 50 + 100
+
+        domainCircles =
+            List.range 1 model.n
+                |> List.map (\i -> viewCircle 50 (i * 50) (String.fromInt i))
+
+        codomainCircles =
+            List.range 1 model.m
+                |> List.map (\i -> viewCircle 250 (i * 50) (String.fromInt i))
+
+        arrows =
+            Array.toList model.mappings
+                |> List.indexedMap (\i v -> viewArrow (i + 1) v)
+    in
+    Svg.svg
+        [ SA.width (String.fromInt svgWidth)
+        , SA.height (String.fromInt svgHeight)
+        , SA.viewBox ("0 0 " ++ String.fromInt svgWidth ++ " " ++ String.fromInt svgHeight)
+        ]
+        (Svg.defs []
+            [ Svg.marker
+                [ SA.id "arrowhead"
+                , SA.markerWidth "10"
+                , SA.markerHeight "7"
+                , SA.refX "10"
+                , SA.refY "3.5"
+                , SA.orient "auto"
+                ]
+                [ Svg.polygon [ SA.points "0 0, 10 3.5, 0 7" ] [] ]
+            ]
+            :: domainCircles
+            ++ codomainCircles
+            ++ arrows
+        )
+
+
+viewCircle : Int -> Int -> String -> Svg msg
+viewCircle x y label =
+    Svg.g []
+        [ Svg.circle
+            [ SA.cx (String.fromInt x)
+            , SA.cy (String.fromInt y)
+            , SA.r "20"
+            , SA.fill "white"
+            , SA.stroke "black"
+            ]
+            []
+        , Svg.text_
+            [ SA.x (String.fromInt x)
+            , SA.y (String.fromInt y)
+            , SA.textAnchor "middle"
+            , SA.dominantBaseline "central"
+            ]
+            [ Svg.text label ]
+        ]
+
+
+viewArrow : Int -> Int -> Svg msg
+viewArrow from to =
+    Svg.line
+        [ SA.x1 "70"
+        , SA.y1 (String.fromInt (from * 50))
+        , SA.x2 "230"
+        , SA.y2 (String.fromInt (to * 50))
+        , SA.stroke "black"
+        , SA.markerEnd "url(#arrowhead)"
+        ]
+        []
