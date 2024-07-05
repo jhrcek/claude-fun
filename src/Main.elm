@@ -51,14 +51,14 @@ update msg model =
         UpdateN nStr ->
             let
                 newN =
-                    Maybe.withDefault 0 (String.toInt nStr)
+                    clamp 0 maxSetSize <| Maybe.withDefault 0 (String.toInt nStr)
             in
             ( { model | n = newN, mappings = Array.repeat newN 1 }, Cmd.none )
 
         UpdateM mStr ->
             let
                 newM =
-                    Maybe.withDefault 0 (String.toInt mStr)
+                    clamp 0 maxSetSize <| Maybe.withDefault 0 (String.toInt mStr)
             in
             ( { model | m = newM }, Cmd.none )
 
@@ -97,7 +97,7 @@ setSizeInput label value toMsg =
         , Html.input
             [ A.type_ "number"
             , A.min "0"
-            , A.max "10"
+            , A.max (String.fromInt maxSetSize)
             , A.value (String.fromInt value)
             , E.onInput toMsg
             ]
@@ -124,18 +124,18 @@ viewSvgMapping : Model -> Html Msg
 viewSvgMapping model =
     let
         svgWidth =
-            300
+            (domainCodomainGridDist + 1) * gridUnit
 
         svgHeight =
-            max model.n model.m * 50 + 100
+            (2 + max model.n model.m) * gridUnit
 
         domainCircles =
             List.range 1 model.n
-                |> List.map (\i -> viewCircle 50 (i * 50) (String.fromInt i))
+                |> List.map (\i -> viewCircle gridUnit (i * gridUnit) (String.fromInt i))
 
         codomainCircles =
             List.range 1 model.m
-                |> List.map (\i -> viewCircle 250 (i * 50) (String.fromInt i))
+                |> List.map (\i -> viewCircle (domainCodomainGridDist * gridUnit) (i * gridUnit) (String.fromInt i))
 
         arrows =
             Array.toList model.mappings
@@ -169,7 +169,7 @@ viewCircle x y label =
         [ Svg.circle
             [ SA.cx (String.fromInt x)
             , SA.cy (String.fromInt y)
-            , SA.r "20"
+            , SA.r (String.fromInt circleRadius)
             , SA.fill "white"
             , SA.stroke "black"
             ]
@@ -186,12 +186,45 @@ viewCircle x y label =
 
 viewArrow : Int -> Int -> Svg msg
 viewArrow from to =
+    let
+        x1 =
+            gridUnit + circleRadius
+
+        x2 =
+            domainCodomainGridDist * gridUnit - circleRadius
+
+        y1 =
+            from * gridUnit
+
+        y2 =
+            to * gridUnit
+    in
     Svg.line
-        [ SA.x1 "70"
-        , SA.y1 (String.fromInt (from * 50))
-        , SA.x2 "230"
-        , SA.y2 (String.fromInt (to * 50))
+        [ SA.x1 (String.fromInt x1)
+        , SA.y1 (String.fromInt y1)
+        , SA.x2 (String.fromInt x2)
+        , SA.y2 (String.fromInt y2)
         , SA.stroke "black"
         , SA.markerEnd "url(#arrowhead)"
         ]
         []
+
+
+maxSetSize : Int
+maxSetSize =
+    10
+
+
+domainCodomainGridDist : Int
+domainCodomainGridDist =
+    5
+
+
+circleRadius : Int
+circleRadius =
+    20
+
+
+gridUnit : Int
+gridUnit =
+    50
