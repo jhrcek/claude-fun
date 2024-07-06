@@ -126,8 +126,8 @@ view : Model -> Html Msg
 view model =
     Html.div []
         [ Html.h1 [] [ Html.text "Function Mapping App" ]
-        , setSizeInput "domain size: " model.domain UpdateDomain
-        , setSizeInput "codomain size: " model.codomain UpdateCodomain
+        , setSizeInput "Domain size: " model.domain UpdateDomain
+        , setSizeInput "Codomain size: " model.codomain UpdateCodomain
         , Html.text "Generate function: "
         , Html.button [ E.onClick GenFunction ] [ Html.text "Any" ]
         , Html.button
@@ -194,11 +194,11 @@ viewSvgMapping model =
 
         domainCircles =
             List.range 1 model.domain
-                |> List.map (\i -> viewCircle gridUnit (i * gridUnit) (String.fromInt i))
+                |> List.map (\i -> viewCircle (Array.get (i - 1) model.mappings == Just 0) 1 i)
 
         codomainCircles =
             List.range 1 model.codomain
-                |> List.map (\i -> viewCircle (domainCodomainGridDist * gridUnit) (i * gridUnit) (String.fromInt i))
+                |> List.map (\i -> viewCircle False domainCodomainGridDist i)
 
         arrows =
             Array.toList model.mappings
@@ -226,24 +226,30 @@ viewSvgMapping model =
         )
 
 
-viewCircle : Int -> Int -> String -> Svg msg
-viewCircle x y label =
+viewCircle : Bool -> Int -> Int -> Svg msg
+viewCircle isHighlighted gridX gridY =
     Svg.g []
         [ Svg.circle
-            [ SA.cx (String.fromInt x)
-            , SA.cy (String.fromInt y)
+            [ SA.cx <| String.fromInt <| gridX * gridUnit
+            , SA.cy <| String.fromInt <| gridY * gridUnit
             , SA.r (String.fromInt circleRadius)
             , SA.fill "white"
-            , SA.stroke "black"
+            , SA.strokeWidth "1"
+            , SA.stroke <|
+                if isHighlighted then
+                    "red"
+
+                else
+                    "black"
             ]
             []
         , Svg.text_
-            [ SA.x (String.fromInt x)
-            , SA.y (String.fromInt y)
+            [ SA.x <| String.fromInt <| gridX * gridUnit
+            , SA.y <| String.fromInt <| gridY * gridUnit
             , SA.textAnchor "middle"
             , SA.dominantBaseline "central"
             ]
-            [ Svg.text label ]
+            [ Svg.text (String.fromInt gridY) ]
         ]
 
 
@@ -305,12 +311,10 @@ genInjective domain codomain =
         |> Random.map (List.take domain)
 
 
-
-
-
 genBijective : Int -> Random.Generator (List Int)
 genBijective domain =
     List.range 1 domain |> Random.List.shuffle
+
 
 genSurjective : Int -> Int -> Random.Generator (List Int)
 genSurjective domain codomain =
