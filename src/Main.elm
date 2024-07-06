@@ -31,7 +31,7 @@ init : () -> ( Model, Cmd Msg )
 init _ =
     ( { n = 1
       , m = 1
-      , mappings = Array.repeat 1 1
+      , mappings = Array.repeat 1 0
       }
     , Cmd.none
     )
@@ -53,19 +53,45 @@ update msg model =
                 newN =
                     clamp 0 maxSetSize <| Maybe.withDefault 0 (String.toInt nStr)
             in
-            ( { model | n = newN, mappings = Array.repeat newN 1 }, Cmd.none )
+            ( { model
+                | n = newN
+                , mappings =
+                    Array.initialize newN (\x -> Array.get x model.mappings |> Maybe.withDefault 0)
+              }
+            , Cmd.none
+            )
 
         UpdateM mStr ->
             let
                 newM =
                     clamp 0 maxSetSize <| Maybe.withDefault 0 (String.toInt mStr)
             in
-            ( { model | m = newM }, Cmd.none )
+            ( { model
+                | m = newM
+                , mappings =
+                    Array.map
+                        (\y ->
+                            if y > newM then
+                                0
+
+                            else
+                                y
+                        )
+                        model.mappings
+              }
+            , Cmd.none
+            )
 
         UpdateMapping index valueStr ->
             let
                 value =
-                    Maybe.withDefault 1 (String.toInt valueStr)
+                    case String.toInt valueStr of
+                        Just v ->
+                            v
+
+                        Nothing ->
+                            -- fall back to "unspecified"
+                            0
             in
             ( { model | mappings = Array.set index value model.mappings }, Cmd.none )
 
@@ -110,14 +136,17 @@ viewMapping model index value =
     Html.div []
         [ Html.text ("f(" ++ String.fromInt (index + 1) ++ ") = ")
         , Html.select [ E.onInput (UpdateMapping index) ]
-            (List.map (viewOption value) (List.range 1 model.m))
+            (viewOption 0 "?" :: List.map (viewOption value << String.fromInt) (List.range 1 model.m))
         ]
 
 
-viewOption : Int -> Int -> Html msg
+viewOption : Int -> String -> Html msg
 viewOption selected value =
-    Html.option [ A.value (String.fromInt value), A.selected (value == selected) ]
-        [ Html.text (String.fromInt value) ]
+    Html.option
+        [ A.value value
+        , A.selected (String.fromInt selected == value)
+        ]
+        [ Html.text value ]
 
 
 viewSvgMapping : Model -> Html Msg
@@ -186,28 +215,33 @@ viewCircle x y label =
 
 viewArrow : Int -> Int -> Svg msg
 viewArrow from to =
-    let
-        x1 =
-            gridUnit + circleRadius
+    if to == 0 then
+        Svg.g [] []
+        -- Don't draw an arrow for unspecified mappings
 
-        x2 =
-            domainCodomainGridDist * gridUnit - circleRadius
+    else
+        let
+            x1 =
+                gridUnit + circleRadius
 
-        y1 =
-            from * gridUnit
+            x2 =
+                domainCodomainGridDist * gridUnit - circleRadius
 
-        y2 =
-            to * gridUnit
-    in
-    Svg.line
-        [ SA.x1 (String.fromInt x1)
-        , SA.y1 (String.fromInt y1)
-        , SA.x2 (String.fromInt x2)
-        , SA.y2 (String.fromInt y2)
-        , SA.stroke "black"
-        , SA.markerEnd "url(#arrowhead)"
-        ]
-        []
+            y1 =
+                from * gridUnit
+
+            y2 =
+                to * gridUnit
+        in
+        Svg.line
+            [ SA.x1 (String.fromInt x1)
+            , SA.y1 (String.fromInt y1)
+            , SA.x2 (String.fromInt x2)
+            , SA.y2 (String.fromInt y2)
+            , SA.stroke "black"
+            , SA.markerEnd "url(#arrowhead)"
+            ]
+            []
 
 
 maxSetSize : Int
