@@ -133,16 +133,34 @@ view model =
         , Html.button
             [ E.onClick GenInjective
             , A.disabled (model.domain > model.codomain)
+            , A.title <|
+                if model.domain > model.codomain then
+                    "There are no injective functions when the domain is larger than the codomain"
+
+                else
+                    "Generate random injective function"
             ]
             [ Html.text "Injective" ]
         , Html.button
             [ E.onClick GenSurjective
             , A.disabled (model.domain < model.codomain)
+            , A.title <|
+                if model.domain < model.codomain then
+                    "There are no surjective functions when the domain is smaller than the codomain"
+
+                else
+                    "Generate random surjective function"
             ]
             [ Html.text "Surjective" ]
         , Html.button
             [ E.onClick GenBijective
             , A.disabled (model.domain /= model.codomain)
+            , A.title <|
+                if model.domain /= model.codomain then
+                    "Bijective functions only exist when the domain and codomain have the same size"
+
+                else
+                    "Generate random bijective function"
             ]
             [ Html.text "Bijective" ]
         , Html.div [] (List.indexedMap (viewMapping model) (Array.toList model.mappings))
