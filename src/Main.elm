@@ -76,6 +76,7 @@ update msg model =
                     Array.map
                         (\y ->
                             if y > newM then
+                                -- if the codomain size is reduced, set mappings to no longer existing codomains to "undefined"
                                 0
 
                             else
@@ -205,10 +206,10 @@ viewSvgMapping : Model -> Html Msg
 viewSvgMapping model =
     let
         svgWidth =
-            (domainCodomainGridDist + 1) * gridUnit
+            (1 + domainCodomainGridDist) * gridUnit
 
         svgHeight =
-            (2 + max model.domain model.codomain) * gridUnit
+            (1 + max model.domain model.codomain) * gridUnit
 
         domainCircles =
             List.range 1 model.domain
@@ -238,6 +239,7 @@ viewSvgMapping model =
                 ]
                 [ Svg.polygon [ SA.points "0 0, 10 3.5, 0 7" ] [] ]
             ]
+            :: viewGrid (1 + domainCodomainGridDist) (1 + max model.domain model.codomain)
             :: domainCircles
             ++ codomainCircles
             ++ arrows
@@ -300,6 +302,42 @@ viewArrow from to =
             , SA.markerEnd "url(#arrowhead)"
             ]
             []
+
+
+viewGrid : Int -> Int -> Svg msg
+viewGrid width height =
+    let
+        horizontalLines =
+            List.range 0 height
+                |> List.map
+                    (\i ->
+                        Svg.line
+                            [ SA.x1 "0"
+                            , SA.y1 (String.fromInt (i * gridUnit))
+                            , SA.x2 (String.fromInt (width * gridUnit))
+                            , SA.y2 (String.fromInt (i * gridUnit))
+                            , SA.stroke "#eee"
+                            , SA.strokeWidth "1"
+                            ]
+                            []
+                    )
+
+        verticalLines =
+            List.range 0 width
+                |> List.map
+                    (\i ->
+                        Svg.line
+                            [ SA.x1 (String.fromInt (i * gridUnit))
+                            , SA.y1 "0"
+                            , SA.x2 (String.fromInt (i * gridUnit))
+                            , SA.y2 (String.fromInt (height * gridUnit))
+                            , SA.stroke "#eee"
+                            , SA.strokeWidth "1"
+                            ]
+                            []
+                    )
+    in
+    Svg.g [] (horizontalLines ++ verticalLines)
 
 
 maxSetSize : Int
