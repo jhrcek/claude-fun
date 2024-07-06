@@ -6,6 +6,7 @@ import Html exposing (Html)
 import Html.Attributes as A
 import Html.Events as E
 import Random
+import Random.List
 import Svg exposing (Svg)
 import Svg.Attributes as SA
 
@@ -21,16 +22,16 @@ main =
 
 
 type alias Model =
-    { n : Int
-    , m : Int
+    { domain : Int
+    , codomain : Int
     , mappings : Array Int
     }
 
 
 init : () -> ( Model, Cmd Msg )
 init _ =
-    ( { n = 1
-      , m = 1
+    ( { domain = 1
+      , codomain = 1
       , mappings = Array.repeat 1 0
       }
     , Cmd.none
@@ -38,36 +39,39 @@ init _ =
 
 
 type Msg
-    = UpdateN String
-    | UpdateM String
+    = UpdateDomain String
+    | UpdateCodomain String
     | UpdateMapping Int String
-    | GenerateRandom
+    | GenFunction
+    | GenInjective
+    | GenSurjective
+    | GenBijective
     | NewRandomMapping (List Int)
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
-        UpdateN nStr ->
+        UpdateDomain domStr ->
             let
                 newN =
-                    clamp 0 maxSetSize <| Maybe.withDefault 0 (String.toInt nStr)
+                    clamp 0 maxSetSize <| Maybe.withDefault 0 (String.toInt domStr)
             in
             ( { model
-                | n = newN
+                | domain = newN
                 , mappings =
                     Array.initialize newN (\x -> Array.get x model.mappings |> Maybe.withDefault 0)
               }
             , Cmd.none
             )
 
-        UpdateM mStr ->
+        UpdateCodomain codStr ->
             let
                 newM =
-                    clamp 0 maxSetSize <| Maybe.withDefault 0 (String.toInt mStr)
+                    clamp 0 maxSetSize <| Maybe.withDefault 0 (String.toInt codStr)
             in
             ( { model
-                | m = newM
+                | codomain = newM
                 , mappings =
                     Array.map
                         (\y ->
@@ -90,14 +94,28 @@ update msg model =
                             v
 
                         Nothing ->
-                            -- fall back to "unspecified"
                             0
             in
             ( { model | mappings = Array.set index value model.mappings }, Cmd.none )
 
-        GenerateRandom ->
+        GenFunction ->
             ( model
-            , Random.generate NewRandomMapping (Random.list model.n (Random.int 1 model.m))
+            , Random.generate NewRandomMapping (Random.list model.domain (Random.int 1 model.codomain))
+            )
+
+        GenInjective ->
+            ( model
+            , Random.generate NewRandomMapping (genInjective model.domain model.codomain)
+            )
+
+        GenSurjective ->
+            ( model
+            , Random.generate NewRandomMapping (genSurjective model.domain model.codomain)
+            )
+
+        GenBijective ->
+            ( model
+            , Random.generate NewRandomMapping (genBijective model.domain)
             )
 
         NewRandomMapping randomList ->
@@ -108,9 +126,25 @@ view : Model -> Html Msg
 view model =
     Html.div []
         [ Html.h1 [] [ Html.text "Function Mapping App" ]
-        , setSizeInput "n (domain size): " model.n UpdateN
-        , setSizeInput "m (codomain size): " model.m UpdateM
-        , Html.button [ E.onClick GenerateRandom ] [ Html.text "Random" ]
+        , setSizeInput "domain size: " model.domain UpdateDomain
+        , setSizeInput "codomain size: " model.codomain UpdateCodomain
+        , Html.text "Generate function: "
+        , Html.button [ E.onClick GenFunction ] [ Html.text "Any" ]
+        , Html.button
+            [ E.onClick GenInjective
+            , A.disabled (model.domain > model.codomain)
+            ]
+            [ Html.text "Injective" ]
+        , Html.button
+            [ E.onClick GenSurjective
+            , A.disabled (model.domain < model.codomain)
+            ]
+            [ Html.text "Surjective" ]
+        , Html.button
+            [ E.onClick GenBijective
+            , A.disabled (model.domain /= model.codomain)
+            ]
+            [ Html.text "Bijective" ]
         , Html.div [] (List.indexedMap (viewMapping model) (Array.toList model.mappings))
         , viewSvgMapping model
         ]
@@ -136,7 +170,7 @@ viewMapping model index value =
     Html.div []
         [ Html.text ("f(" ++ String.fromInt (index + 1) ++ ") = ")
         , Html.select [ E.onInput (UpdateMapping index) ]
-            (viewOption 0 "?" :: List.map (viewOption value << String.fromInt) (List.range 1 model.m))
+            (viewOption 0 "?" :: List.map (viewOption value << String.fromInt) (List.range 1 model.codomain))
         ]
 
 
@@ -156,14 +190,14 @@ viewSvgMapping model =
             (domainCodomainGridDist + 1) * gridUnit
 
         svgHeight =
-            (2 + max model.n model.m) * gridUnit
+            (2 + max model.domain model.codomain) * gridUnit
 
         domainCircles =
-            List.range 1 model.n
+            List.range 1 model.domain
                 |> List.map (\i -> viewCircle gridUnit (i * gridUnit) (String.fromInt i))
 
         codomainCircles =
-            List.range 1 model.m
+            List.range 1 model.codomain
                 |> List.map (\i -> viewCircle (domainCodomainGridDist * gridUnit) (i * gridUnit) (String.fromInt i))
 
         arrows =
@@ -216,8 +250,8 @@ viewCircle x y label =
 viewArrow : Int -> Int -> Svg msg
 viewArrow from to =
     if to == 0 then
-        Svg.g [] []
         -- Don't draw an arrow for unspecified mappings
+        Svg.g [] []
 
     else
         let
@@ -262,3 +296,40 @@ circleRadius =
 gridUnit : Int
 gridUnit =
     50
+
+
+genInjective : Int -> Int -> Random.Generator (List Int)
+genInjective domain codomain =
+    List.range 1 codomain
+        |> Random.List.shuffle
+        |> Random.map (List.take domain)
+
+
+
+
+
+genBijective : Int -> Random.Generator (List Int)
+genBijective domain =
+    List.range 1 domain |> Random.List.shuffle
+
+genSurjective : Int -> Int -> Random.Generator (List Int)
+genSurjective domain codomain =
+    List.range 1 domain
+        |> Random.List.shuffle
+        |> Random.andThen
+            (\shuffled ->
+                let
+                    -- ensure that each codomain element has at least 1 element from the domain mapping to it
+                    startMappings =
+                        List.map2 Tuple.pair (List.take codomain shuffled) (List.range 1 codomain)
+                in
+                -- assign remaining domain elements randomly to 1..codomain
+                Random.list (domain - codomain) (Random.int 1 codomain)
+                    |> Random.map
+                        (\cod ->
+                            startMappings
+                                ++ List.map2 Tuple.pair (List.drop codomain shuffled) cod
+                                |> List.sortBy Tuple.first
+                                |> List.map Tuple.second
+                        )
+            )
