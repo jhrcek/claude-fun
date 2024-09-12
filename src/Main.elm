@@ -22,154 +22,217 @@ main =
 
 
 type alias Model =
-    { domain : Int
-    , codomain : Int
-    , mappings : Array Int
+    { f : Fun
+    , g : Fun
+    , commonCodomain : Int
     }
 
 
 init : () -> ( Model, Cmd Msg )
 init _ =
-    ( { domain = 1
-      , codomain = 1
-      , mappings = Array.repeat 1 0
+    ( { f = { domain = 1, mappings = Array.repeat 1 0 }
+      , g = { domain = 1, mappings = Array.repeat 1 0 }
+      , commonCodomain = 1
       }
     , Cmd.none
     )
 
 
+type Function
+    = F
+    | G
+
+
+type alias Fun =
+    { domain : Int, mappings : Array Int }
+
+
+overMappings : (Array Int -> Array Int) -> Fun -> Fun
+overMappings f fun =
+    { fun | mappings = f fun.mappings }
+
+
+overFun : Function -> (Fun -> Fun) -> Model -> Model
+overFun fun f model =
+    case fun of
+        F ->
+            { model | f = f model.f }
+
+        G ->
+            { model | g = f model.g }
+
+
 type Msg
-    = UpdateDomain String
-    | UpdateCodomain String
-    | UpdateMapping Int String
-    | GenFunction
-    | GenInjective
-    | GenSurjective
-    | GenBijective
-    | NewRandomMapping (List Int)
+    = SetDomainSize Function Int
+    | SetCommonCodomainSize Int
+    | UpdateMapping Function Int String
+    | GenFunction Function FunctionProperty
+    | NewRandomMapping Function (List Int)
+    | NoOp
+
+
+type FunctionProperty
+    = Any
+    | Injective
+    | Surjective
+    | Bijective
+    | Monotonic
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
-        UpdateDomain domStr ->
+        SetDomainSize fun newDomain ->
+            pure <|
+                overFun fun
+                    (\fn ->
+                        { fn
+                            | domain = newDomain
+                            , mappings = Array.initialize newDomain (\x -> Array.get x fn.mappings |> Maybe.withDefault 0)
+                        }
+                    )
+                    model
+
+        SetCommonCodomainSize newCodomainSize ->
             let
-                newN =
-                    clamp 0 maxSetSize <| Maybe.withDefault 0 (String.toInt domStr)
+                restrictToNewCodomain y =
+                    if y > newCodomainSize then
+                        -- if the codomain size is reduced, set mappings to no longer existing codomains to "undefined"
+                        0
+
+                    else
+                        y
             in
-            ( { model
-                | domain = newN
-                , mappings =
-                    Array.initialize newN (\x -> Array.get x model.mappings |> Maybe.withDefault 0)
-              }
-            , Cmd.none
-            )
+            pure
+                { model
+                    | commonCodomain = newCodomainSize
+                    , f = overMappings (Array.map restrictToNewCodomain) model.f
+                    , g = overMappings (Array.map restrictToNewCodomain) model.g
+                }
 
-        UpdateCodomain codStr ->
-            let
-                newM =
-                    clamp 0 maxSetSize <| Maybe.withDefault 0 (String.toInt codStr)
-            in
-            ( { model
-                | codomain = newM
-                , mappings =
-                    Array.map
-                        (\y ->
-                            if y > newM then
-                                -- if the codomain size is reduced, set mappings to no longer existing codomains to "undefined"
-                                0
-
-                            else
-                                y
-                        )
-                        model.mappings
-              }
-            , Cmd.none
-            )
-
-        UpdateMapping index valueStr ->
+        UpdateMapping fun index valueStr ->
             let
                 value =
-                    case String.toInt valueStr of
-                        Just v ->
-                            v
-
-                        Nothing ->
-                            0
+                    String.toInt valueStr |> Maybe.withDefault 0
             in
-            ( { model | mappings = Array.set index value model.mappings }, Cmd.none )
+            pure <| overFun fun (overMappings (Array.set index value)) model
 
-        GenFunction ->
+        GenFunction fun prop ->
             ( model
-            , Random.generate NewRandomMapping (Random.list model.domain (Random.int 1 model.codomain))
+            , Random.generate (NewRandomMapping fun) <|
+                case prop of
+                    Any ->
+                        Random.list (getDomain fun model) (Random.int 1 model.commonCodomain)
+
+                    Injective ->
+                        genInjective (getDomain fun model) model.commonCodomain
+
+                    Surjective ->
+                        genSurjective (getDomain fun model) model.commonCodomain
+
+                    Bijective ->
+                        genBijective (getDomain fun model)
+
+                    Monotonic ->
+                        Random.map List.sort <| Random.list (getDomain fun model) (Random.int 1 model.commonCodomain)
             )
 
-        GenInjective ->
-            ( model
-            , Random.generate NewRandomMapping (genInjective model.domain model.codomain)
-            )
+        NewRandomMapping fun randomList ->
+            pure <| overFun fun (overMappings (\_ -> Array.fromList randomList)) model
 
-        GenSurjective ->
-            ( model
-            , Random.generate NewRandomMapping (genSurjective model.domain model.codomain)
-            )
+        NoOp ->
+            pure model
 
-        GenBijective ->
-            ( model
-            , Random.generate NewRandomMapping (genBijective model.domain)
-            )
 
-        NewRandomMapping randomList ->
-            ( { model | mappings = Array.fromList randomList }, Cmd.none )
+pure : Model -> ( Model, Cmd msg )
+pure model =
+    ( model, Cmd.none )
+
+
+getDomain : Function -> Model -> Int
+getDomain f m =
+    case f of
+        F ->
+            m.f.domain
+
+        G ->
+            m.g.domain
 
 
 view : Model -> Html Msg
 view model =
+    let
+        genButtons fun =
+            let
+                dom =
+                    getDomain fun model
+            in
+            [ Html.text ("Generate " ++ functionName fun ++ ": ")
+            , Html.button [ E.onClick (GenFunction fun Any) ] [ Html.text "Any" ]
+            , Html.button
+                [ E.onClick (GenFunction fun Injective)
+                , A.disabled (dom > model.commonCodomain)
+                , A.title <|
+                    if dom > model.commonCodomain then
+                        "There are no injective functions when the domain is larger than the codomain"
+
+                    else
+                        "Generate random injective function"
+                ]
+                [ Html.text "Injective" ]
+            , Html.button
+                [ E.onClick (GenFunction fun Surjective)
+                , A.disabled (dom < model.commonCodomain)
+                , A.title <|
+                    if dom < model.commonCodomain then
+                        "There are no surjective functions when the domain is smaller than the codomain"
+
+                    else
+                        "Generate random surjective function"
+                ]
+                [ Html.text "Surjective" ]
+            , Html.button
+                [ E.onClick (GenFunction fun Bijective)
+                , A.disabled (dom /= model.commonCodomain)
+                , A.title <|
+                    if dom /= model.commonCodomain then
+                        "Bijective functions only exist when the domain and codomain have the same size"
+
+                    else
+                        "Generate random bijective function"
+                ]
+                [ Html.text "Bijective" ]
+            , Html.button
+                [ E.onClick (GenFunction fun Monotonic) ]
+                [ Html.text "Monotonic" ]
+            ]
+    in
     Html.div []
-        [ Html.h1 [] [ Html.text "Function Mapping App" ]
-        , setSizeInput "Domain size: " model.domain UpdateDomain
-        , setSizeInput "Codomain size: " model.codomain UpdateCodomain
-        , Html.text "Generate function: "
-        , Html.button [ E.onClick GenFunction ] [ Html.text "Any" ]
-        , Html.button
-            [ E.onClick GenInjective
-            , A.disabled (model.domain > model.codomain)
-            , A.title <|
-                if model.domain > model.codomain then
-                    "There are no injective functions when the domain is larger than the codomain"
-
-                else
-                    "Generate random injective function"
+        [ Html.h1 [] [ Html.text "Pullbacks in Set" ]
+        , setSizeInput "f domain size: " model.f.domain (SetDomainSize F)
+        , setSizeInput "g domain size: " model.g.domain (SetDomainSize G)
+        , setSizeInput "Codomain size: " model.commonCodomain SetCommonCodomainSize
+        , Html.div [] (genButtons F)
+        , Html.div [] (genButtons G)
+        , Html.div [ A.style "display" "grid", A.style "grid-template-columns" "100px 100px" ]
+            [ Html.div [] (List.indexedMap (viewMapping F model) (Array.toList model.f.mappings))
+            , Html.div [] (List.indexedMap (viewMapping G model) (Array.toList model.g.mappings))
             ]
-            [ Html.text "Injective" ]
-        , Html.button
-            [ E.onClick GenSurjective
-            , A.disabled (model.domain < model.codomain)
-            , A.title <|
-                if model.domain < model.codomain then
-                    "There are no surjective functions when the domain is smaller than the codomain"
-
-                else
-                    "Generate random surjective function"
-            ]
-            [ Html.text "Surjective" ]
-        , Html.button
-            [ E.onClick GenBijective
-            , A.disabled (model.domain /= model.codomain)
-            , A.title <|
-                if model.domain /= model.codomain then
-                    "Bijective functions only exist when the domain and codomain have the same size"
-
-                else
-                    "Generate random bijective function"
-            ]
-            [ Html.text "Bijective" ]
-        , Html.div [] (List.indexedMap (viewMapping model) (Array.toList model.mappings))
-        , viewSvgMapping model
+        , viewPullback model
         ]
 
 
-setSizeInput : String -> Int -> (String -> Msg) -> Html Msg
+functionName : Function -> String
+functionName fun =
+    case fun of
+        F ->
+            "f"
+
+        G ->
+            "g"
+
+
+setSizeInput : String -> Int -> (Int -> Msg) -> Html Msg
 setSizeInput label value toMsg =
     Html.div []
         [ Html.label [] [ Html.text label ]
@@ -178,18 +241,26 @@ setSizeInput label value toMsg =
             , A.min "0"
             , A.max (String.fromInt maxSetSize)
             , A.value (String.fromInt value)
-            , E.onInput toMsg
+            , E.onInput
+                (\str ->
+                    case String.toInt str of
+                        Just i ->
+                            toMsg (clamp minSetSize maxSetSize i)
+
+                        Nothing ->
+                            NoOp
+                )
             ]
             []
         ]
 
 
-viewMapping : Model -> Int -> Int -> Html Msg
-viewMapping model index value =
+viewMapping : Function -> Model -> Int -> Int -> Html Msg
+viewMapping fun model index value =
     Html.div []
-        [ Html.text ("f(" ++ String.fromInt (index + 1) ++ ") = ")
-        , Html.select [ E.onInput (UpdateMapping index) ]
-            (viewOption 0 "?" :: List.map (viewOption value << String.fromInt) (List.range 1 model.codomain))
+        [ Html.text (functionName fun ++ "(" ++ String.fromInt (index + 1) ++ ") = ")
+        , Html.select [ E.onInput (UpdateMapping fun index) ]
+            (viewOption 0 "?" :: List.map (viewOption value << String.fromInt) (List.range 1 model.commonCodomain))
         ]
 
 
@@ -202,26 +273,84 @@ viewOption selected value =
         [ Html.text value ]
 
 
-viewSvgMapping : Model -> Html Msg
-viewSvgMapping model =
+viewPullback : Model -> Html Msg
+viewPullback model =
     let
+        gridWidth =
+            2 + model.f.domain + max model.g.domain model.commonCodomain
+
         svgWidth =
-            (1 + domainCodomainGridDist) * gridUnit
+            gridWidth * gridUnit
+
+        gridHeight =
+            2 + model.g.domain + max model.f.domain model.commonCodomain
 
         svgHeight =
-            (1 + max model.domain model.codomain) * gridUnit
+            gridHeight * gridUnit
 
-        domainCircles =
-            List.range 1 model.domain
-                |> List.map (\i -> viewCircle (Array.get (i - 1) model.mappings == Just 0) 1 i)
+        fDomainCircles =
+            List.range 1 model.f.domain
+                |> List.map (\i -> viewCircle (String.fromInt i) (Array.get (i - 1) model.f.mappings == Just 0) (model.f.domain - i + 1) (model.g.domain + i + 1))
+
+        gDomainCircles =
+            List.range 1 model.g.domain
+                |> List.map (\i -> viewCircle (String.fromInt i) (Array.get (i - 1) model.g.mappings == Just 0) (model.f.domain + i + 1) (model.g.domain - i + 1))
 
         codomainCircles =
-            List.range 1 model.codomain
-                |> List.map (\i -> viewCircle False domainCodomainGridDist i)
+            List.range 1 model.commonCodomain
+                |> List.map (\i -> viewCircle (String.fromInt i) False (model.f.domain + i + 1) (model.g.domain + i + 1))
 
-        arrows =
-            Array.toList model.mappings
-                |> List.indexedMap (\i v -> viewArrow (i + 1) v)
+        fArrows =
+            Array.toList model.f.mappings
+                |> List.indexedMap
+                    (\i v ->
+                        viewArrowGrid
+                            -- horizontal
+                            True
+                            (model.f.domain - i)
+                            (model.g.domain + (i + 1 + 1))
+                            (model.f.domain + v + 1)
+                            (model.g.domain + v + 1)
+                            v
+                    )
+
+        gArrows =
+            Array.toList model.g.mappings
+                |> List.indexedMap
+                    (\i v ->
+                        viewArrowGrid
+                            --vertical
+                            False
+                            (model.f.domain + i + 2)
+                            (model.g.domain - i)
+                            (model.f.domain + v + 1)
+                            (model.g.domain + v + 1)
+                            v
+                    )
+
+        pullbackCircles =
+            List.range 1 model.f.domain
+                |> List.concatMap
+                    (\x1 ->
+                        List.range 1 model.g.domain
+                            |> List.concatMap
+                                (\x2 ->
+                                    case ( Array.get (x1 - 1) model.f.mappings, Array.get (x2 - 1) model.g.mappings ) of
+                                        ( Just fx, Just gx ) ->
+                                            if fx == gx && fx /= 0 then
+                                                [ viewCircle (String.fromInt x1 ++ "," ++ String.fromInt x2)
+                                                    False
+                                                    (model.f.domain - x1 + 1)
+                                                    (model.g.domain - x2 + 1)
+                                                ]
+
+                                            else
+                                                []
+
+                                        _ ->
+                                            []
+                                )
+                    )
     in
     Svg.svg
         [ SA.width (String.fromInt svgWidth)
@@ -239,15 +368,18 @@ viewSvgMapping model =
                 ]
                 [ Svg.polygon [ SA.points "0 0, 10 3.5, 0 7" ] [] ]
             ]
-            :: viewGrid (1 + domainCodomainGridDist) (1 + max model.domain model.codomain)
-            :: domainCircles
+            :: viewGrid gridWidth gridHeight
+            :: fDomainCircles
+            ++ gDomainCircles
             ++ codomainCircles
-            ++ arrows
+            ++ fArrows
+            ++ gArrows
+            ++ pullbackCircles
         )
 
 
-viewCircle : Bool -> Int -> Int -> Svg msg
-viewCircle isHighlighted gridX gridY =
+viewCircle : String -> Bool -> Int -> Int -> Svg msg
+viewCircle label isHighlighted gridX gridY =
     Svg.g []
         [ Svg.circle
             [ SA.cx <| String.fromInt <| gridX * gridUnit
@@ -269,29 +401,45 @@ viewCircle isHighlighted gridX gridY =
             , SA.textAnchor "middle"
             , SA.dominantBaseline "central"
             ]
-            [ Svg.text (String.fromInt gridY) ]
+            [ Svg.text label ]
         ]
 
 
-viewArrow : Int -> Int -> Svg msg
-viewArrow from to =
-    if to == 0 then
+viewArrowGrid : Bool -> Int -> Int -> Int -> Int -> Int -> Svg msg
+viewArrowGrid isHoriz fromGridX fromGridY toGridX toGridY val =
+    if val == 0 then
         -- Don't draw an arrow for unspecified mappings
         Svg.g [] []
 
     else
         let
+            hr =
+                -- horizontal radius
+                if isHoriz then
+                    circleRadius
+
+                else
+                    0
+
+            vr =
+                -- vertical radius
+                if isHoriz then
+                    0
+
+                else
+                    circleRadius
+
             x1 =
-                gridUnit + circleRadius
+                fromGridX * gridUnit + hr
 
             x2 =
-                domainCodomainGridDist * gridUnit - circleRadius
+                toGridX * gridUnit - hr
 
             y1 =
-                from * gridUnit
+                fromGridY * gridUnit + vr
 
             y2 =
-                to * gridUnit
+                toGridY * gridUnit - vr
         in
         Svg.line
             [ SA.x1 (String.fromInt x1)
@@ -340,14 +488,14 @@ viewGrid width height =
     Svg.g [] (horizontalLines ++ verticalLines)
 
 
+minSetSize : Int
+minSetSize =
+    1
+
+
 maxSetSize : Int
 maxSetSize =
     10
-
-
-domainCodomainGridDist : Int
-domainCodomainGridDist =
-    5
 
 
 circleRadius : Int
