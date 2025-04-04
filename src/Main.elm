@@ -5,6 +5,7 @@ import Browser
 import Html exposing (Html)
 import Html.Attributes as A
 import Html.Events as E
+import List.Extra
 import Random
 import Random.List
 import Svg exposing (Svg)
@@ -42,11 +43,69 @@ type Msg
     = UpdateDomain String
     | UpdateCodomain String
     | UpdateMapping Int String
-    | GenFunction
-    | GenInjective
-    | GenSurjective
-    | GenBijective
+    | Generate FunctionProperty
     | NewRandomMapping (List Int)
+
+
+type FunctionProperty
+    = Any
+    | Injective
+    | Surjective
+    | Bijective
+    | Idempotent
+
+
+type alias PropertyConfig =
+    { label : String
+    , isDisabled : Int -> Int -> Bool
+    , disabledExplanation : Maybe String -- TODO making impossible states impossible this should be Just <=> isDisabled
+    , count : Int -> Int -> Int
+    , generator : Int -> Int -> Random.Generator (List Int)
+    }
+
+
+propertyConfig : FunctionProperty -> PropertyConfig
+propertyConfig prop =
+    case prop of
+        Any ->
+            { label = "Any"
+            , isDisabled = \_ _ -> False
+            , disabledExplanation = Nothing
+            , count = countAllFunctions
+            , generator = genAny
+            }
+
+        Injective ->
+            { label = "Injective"
+            , isDisabled = \domain codomain -> domain > codomain
+            , disabledExplanation = Just "There are no injective functions when the domain is larger than the codomain"
+            , count = countInjective
+            , generator = genInjective
+            }
+
+        Surjective ->
+            { label = "Surjective"
+            , isDisabled = \domain codomain -> domain < codomain
+            , disabledExplanation = Just "There are no surjective functions when the domain is smaller than the codomain"
+            , count = countSurjective
+            , generator = genSurjective
+            }
+
+        Bijective ->
+            { label = "Bijective"
+            , isDisabled = \domain codomain -> domain /= codomain
+            , disabledExplanation = Just "Bijective functions only exist when the domain and codomain have the same size"
+            , count = countBijective
+            , generator = \domain _ -> genBijective domain
+            }
+
+        Idempotent ->
+            { label = "Idempotent"
+            , isDisabled = \domain codomain -> domain /= codomain
+            , disabledExplanation = Just "Idempotent functions only exist when the domain and codomain have the same size"
+            , count = countIdempotent
+            , generator = \domain _ -> genIdempotent domain
+            }
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -98,24 +157,9 @@ update msg model =
             in
             ( { model | mappings = Array.set index value model.mappings }, Cmd.none )
 
-        GenFunction ->
+        Generate functionProperty ->
             ( model
-            , Random.generate NewRandomMapping (Random.list model.domain (Random.int 1 model.codomain))
-            )
-
-        GenInjective ->
-            ( model
-            , Random.generate NewRandomMapping (genInjective model.domain model.codomain)
-            )
-
-        GenSurjective ->
-            ( model
-            , Random.generate NewRandomMapping (genSurjective model.domain model.codomain)
-            )
-
-        GenBijective ->
-            ( model
-            , Random.generate NewRandomMapping (genBijective model.domain)
+            , Random.generate NewRandomMapping <| .generator (propertyConfig functionProperty) model.domain model.codomain
             )
 
         NewRandomMapping randomList ->
@@ -136,27 +180,9 @@ view ({ domain, codomain } as model) =
                 , A.style "gap" "8px"
                 , A.style "margin-left" "10px"
                 ]
-                [ viewFunctionButton "Any"
-                    GenFunction
-                    False
-                    ""
-                    (countAllFunctions domain codomain)
-                , viewFunctionButton "Injective"
-                    GenInjective
-                    (domain > codomain)
-                    "There are no injective functions when the domain is larger than the codomain"
-                    (countInjective domain codomain)
-                , viewFunctionButton "Surjective"
-                    GenSurjective
-                    (domain < codomain)
-                    "There are no surjective functions when the domain is smaller than the codomain"
-                    (countSurjective domain codomain)
-                , viewFunctionButton "Bijective"
-                    GenBijective
-                    (domain /= codomain)
-                    "Bijective functions only exist when the domain and codomain have the same size"
-                    (countBijective domain codomain)
-                ]
+                (List.map (\property -> viewFunctionButton property (propertyConfig property) domain codomain)
+                    [ Any, Injective, Surjective, Bijective, Idempotent ]
+                )
             ]
         , Html.div [ A.style "margin-top" "20px" ]
             (Html.div [] [ Html.text "Mappings:" ]
@@ -166,15 +192,22 @@ view ({ domain, codomain } as model) =
         ]
 
 
-viewFunctionButton : String -> Msg -> Bool -> String -> Int -> Html Msg
-viewFunctionButton label msg isDisabled disabledTitle count =
+viewFunctionButton : FunctionProperty -> PropertyConfig -> Int -> Int -> Html Msg
+viewFunctionButton functionProperty ({ label, isDisabled } as cfg) domain codomain =
+    let
+        disabled =
+            isDisabled domain codomain
+
+        count =
+            cfg.count domain codomain
+    in
     Html.div []
         [ Html.button
-            [ E.onClick msg
-            , A.disabled isDisabled
+            [ E.onClick (Generate functionProperty)
+            , A.disabled disabled
             , A.title <|
-                if isDisabled then
-                    disabledTitle
+                if disabled then
+                    Maybe.withDefault "" cfg.disabledExplanation
 
                 else
                     "Generate random " ++ String.toLower label ++ " function"
@@ -433,6 +466,11 @@ binomial n k =
             |> (\( numerator, denominator ) -> numerator // denominator)
 
 
+genAny : Int -> Int -> Random.Generator (List Int)
+genAny domain codomain =
+    Random.list domain (Random.int 1 codomain)
+
+
 genInjective : Int -> Int -> Random.Generator (List Int)
 genInjective domain codomain =
     List.range 1 codomain
@@ -466,3 +504,92 @@ genSurjective domain codomain =
                                 |> List.map Tuple.second
                         )
             )
+
+
+{-| Generate a random idempotent function
+An idempotent function f satisfies f(f(x)) = f(x) for all x in the domain
+This implementation uses a weighted approach to select the number of fixed points
+based on the distribution of idempotent functions with different numbers of fixed points.
+-}
+genIdempotent : Int -> Random.Generator (List Int)
+genIdempotent size =
+    let
+        -- Step 1: For each possible number of fixed points, calculate the number
+        -- of idempotent functions with that many fixed points.
+        weightedFixedPointCounts =
+            List.range 1 size
+                |> List.filterMap
+                    (\k ->
+                        let
+                            weight =
+                                toFloat (binomial size k * k ^ (size - k))
+                        in
+                        if weight > 0 then
+                            Just ( weight, k )
+
+                        else
+                            Nothing
+                    )
+    in
+    -- Step 2: Select the number of fixed points based on the calculated weights
+    case weightedFixedPointCounts of
+        [] ->
+            Random.constant []
+
+        w :: ws ->
+            Random.weighted w ws
+                |> Random.andThen
+                    (\numFixedPoints ->
+                        -- Step 3: Select which domain elements will be fixed points
+                        Random.List.shuffle (List.range 1 size)
+                            |> Random.map (List.Extra.splitAt numFixedPoints)
+                            |> Random.andThen
+                                (\( fixedPoints, nonFixedPoints ) ->
+                                    let
+                                        -- Create the mappings for fixed points (x -> x)
+                                        fixedPointMappings =
+                                            List.map (\x -> ( x, x )) fixedPoints
+
+                                        -- Step 4: For each non-fixed point, select a random fixed point to map to
+                                        generateNonFixedMappings remainingPoints mappingsAcc =
+                                            case remainingPoints of
+                                                [] ->
+                                                    Random.constant mappingsAcc
+
+                                                x :: xs ->
+                                                    -- Select a random fixed point to map to
+                                                    Random.uniform
+                                                        (List.head fixedPoints |> Maybe.withDefault 1)
+                                                        (List.tail fixedPoints |> Maybe.withDefault [])
+                                                        |> Random.andThen
+                                                            (\selectedFixedPoint ->
+                                                                generateNonFixedMappings xs (( x, selectedFixedPoint ) :: mappingsAcc)
+                                                            )
+                                    in
+                                    generateNonFixedMappings nonFixedPoints fixedPointMappings
+                                        |> Random.map
+                                            (\mappings ->
+                                                mappings
+                                                    |> List.sortBy Tuple.first
+                                                    |> List.map Tuple.second
+                                            )
+                                )
+                    )
+
+
+{-| Count the number of idempotent functions for a given domain size
+For a set of size n, the number of idempotent functions is the sum of
+(n choose k) \* k^(n-k) for k from 1 to n, where k is the number of fixed points
+-}
+countIdempotent : Int -> Int -> Int
+countIdempotent domain codomain =
+    if domain /= codomain then
+        0
+
+    else if domain == 0 then
+        1
+
+    else
+        List.range 1 domain
+            |> List.map (\k -> binomial domain k * k ^ (domain - k))
+            |> List.sum
