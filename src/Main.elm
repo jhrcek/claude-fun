@@ -31,9 +31,13 @@ type alias Model =
 
 init : () -> ( Model, Cmd Msg )
 init _ =
-    ( { domain = 1
-      , codomain = 1
-      , mappings = Array.repeat 1 0
+    let
+        domain =
+            3
+    in
+    ( { domain = domain
+      , codomain = 4
+      , mappings = Array.repeat domain 0
       }
     , Cmd.none
     )
@@ -168,27 +172,33 @@ update msg model =
 
 view : Model -> Html Msg
 view ({ domain, codomain } as model) =
-    Html.div []
-        [ Html.h1 [] [ Html.text "Function Mapping App" ]
-        , setSizeInput "Domain size: " domain UpdateDomain
-        , setSizeInput "Codomain size: " codomain UpdateCodomain
-        , Html.div []
-            [ Html.div [] [ Html.text "Generate function:" ]
-            , Html.div
-                [ A.style "display" "flex"
-                , A.style "flex-direction" "column"
-                , A.style "gap" "8px"
-                , A.style "margin-left" "10px"
+    Html.div [ A.class "app-container" ]
+        [ Html.div [ A.class "header" ]
+            [ Html.h1 [ A.class "title" ] [ Html.text "Function Visualizer" ] ]
+        , Html.div [ A.class "main-content" ]
+            [ Html.div [ A.class "controls-panel" ]
+                [ Html.div [ A.class "control-group" ]
+                    [ Html.h2 [ A.class "section-header" ] [ Html.text "Set Configuration" ]
+                    , setSizeInput "Domain size:" domain UpdateDomain
+                    , setSizeInput "Codomain size:" codomain UpdateCodomain
+                    ]
+                , Html.div [ A.class "control-group" ]
+                    [ Html.h2 [ A.class "section-header" ] [ Html.text "Generate Function" ]
+                    , Html.div [ A.class "function-buttons" ]
+                        (List.map (\property -> viewFunctionButton property (propertyConfig property) domain codomain)
+                            [ Any, Injective, Surjective, Bijective, Idempotent ]
+                        )
+                    ]
+                , Html.div [ A.class "control-group" ]
+                    [ Html.h2 [ A.class "section-header" ] [ Html.text "Function Mappings" ]
+                    , Html.div []
+                        (List.indexedMap (viewMapping model) (Array.toList model.mappings))
+                    ]
                 ]
-                (List.map (\property -> viewFunctionButton property (propertyConfig property) domain codomain)
-                    [ Any, Injective, Surjective, Bijective, Idempotent ]
-                )
+            , Html.div [ A.class "visualization-panel" ]
+                [ viewSvgMapping model ]
             ]
-        , Html.div [ A.style "margin-top" "20px" ]
-            (Html.div [] [ Html.text "Mappings:" ]
-                :: List.indexedMap (viewMapping model) (Array.toList model.mappings)
-            )
-        , viewSvgMapping model
+        , Html.node "style" [] [ Html.text styles ]
         ]
 
 
@@ -211,25 +221,26 @@ viewFunctionButton functionProperty ({ label, isDisabled } as cfg) domain codoma
 
                 else
                     "Generate random " ++ String.toLower label ++ " function"
-            , A.style "min-width" "80px"
+            , A.class "function-button"
             ]
             [ Html.text label ]
         , Html.span
-            [ A.style "margin-left" "5px" ]
+            []
             [ Html.text (" (" ++ String.fromInt count ++ ")") ]
         ]
 
 
 setSizeInput : String -> Int -> (String -> Msg) -> Html Msg
 setSizeInput label value toMsg =
-    Html.div []
-        [ Html.label [] [ Html.text label ]
+    Html.div [ A.class "input-container" ]
+        [ Html.label [ A.class "input-label" ] [ Html.text label ]
         , Html.input
             [ A.type_ "number"
             , A.min "0"
             , A.max (String.fromInt maxSetSize)
             , A.value (String.fromInt value)
             , E.onInput toMsg
+            , A.class "number-input"
             ]
             []
         ]
@@ -237,9 +248,13 @@ setSizeInput label value toMsg =
 
 viewMapping : Model -> Int -> Int -> Html Msg
 viewMapping model index value =
-    Html.div []
-        [ Html.text ("f(" ++ String.fromInt (index + 1) ++ ") = ")
-        , Html.select [ E.onInput (UpdateMapping index) ]
+    Html.div [ A.class "mapping-row" ]
+        [ Html.span [ A.class "mapping-label" ]
+            [ Html.text ("f(" ++ String.fromInt (index + 1) ++ ") = ") ]
+        , Html.select
+            [ E.onInput (UpdateMapping index)
+            , A.class "mapping-select"
+            ]
             (viewOption 0 "?" :: List.map (viewOption value << String.fromInt) (List.range 1 model.codomain))
         ]
 
@@ -274,26 +289,29 @@ viewSvgMapping model =
             Array.toList model.mappings
                 |> List.indexedMap (\i v -> viewArrow (i + 1) v)
     in
-    Svg.svg
-        [ SA.width (String.fromInt svgWidth)
-        , SA.height (String.fromInt svgHeight)
-        , SA.viewBox ("0 0 " ++ String.fromInt svgWidth ++ " " ++ String.fromInt svgHeight)
-        ]
-        (Svg.defs []
-            [ Svg.marker
-                [ SA.id "arrowhead"
-                , SA.markerWidth "10"
-                , SA.markerHeight "7"
-                , SA.refX "10"
-                , SA.refY "3.5"
-                , SA.orient "auto"
-                ]
-                [ Svg.polygon [ SA.points "0 0, 10 3.5, 0 7" ] [] ]
+    Html.div [ A.class "svg-container" ]
+        [ Html.h2 [ A.class "section-header" ] [ Html.text "Function Visualization" ]
+        , Svg.svg
+            [ SA.width (String.fromInt svgWidth)
+            , SA.height (String.fromInt svgHeight)
+            , SA.viewBox ("0 0 " ++ String.fromInt svgWidth ++ " " ++ String.fromInt svgHeight)
             ]
-            :: domainCircles
-            ++ codomainCircles
-            ++ arrows
-        )
+            (Svg.defs []
+                [ Svg.marker
+                    [ SA.id "arrowhead"
+                    , SA.markerWidth "10"
+                    , SA.markerHeight "7"
+                    , SA.refX "10"
+                    , SA.refY "3.5"
+                    , SA.orient "auto"
+                    ]
+                    [ Svg.polygon [ SA.points "0 0, 10 3.5, 0 7", SA.fill "black" ] [] ]
+                ]
+                :: domainCircles
+                ++ codomainCircles
+                ++ arrows
+            )
+        ]
 
 
 viewCircle : Bool -> Int -> Int -> Svg msg
@@ -303,7 +321,7 @@ viewCircle isHighlighted gridX gridY =
             [ SA.cx <| String.fromInt <| gridX * gridUnit
             , SA.cy <| String.fromInt <| gridY * gridUnit
             , SA.r (String.fromInt circleRadius)
-            , SA.fill "white"
+            , SA.fill "#fff"
             , SA.strokeWidth "1"
             , SA.stroke <|
                 if isHighlighted then
@@ -318,6 +336,9 @@ viewCircle isHighlighted gridX gridY =
             , SA.y <| String.fromInt <| gridY * gridUnit
             , SA.textAnchor "middle"
             , SA.dominantBaseline "central"
+            , SA.fontFamily "sans-serif"
+            , SA.fontSize "12px"
+            , SA.fill "black"
             ]
             [ Svg.text (String.fromInt gridY) ]
         ]
@@ -349,6 +370,7 @@ viewArrow from to =
             , SA.x2 (String.fromInt x2)
             , SA.y2 (String.fromInt y2)
             , SA.stroke "black"
+            , SA.strokeWidth "1"
             , SA.markerEnd "url(#arrowhead)"
             ]
             []
@@ -366,12 +388,12 @@ domainCodomainGridDist =
 
 circleRadius : Int
 circleRadius =
-    20
+    16
 
 
 gridUnit : Int
 gridUnit =
-    50
+    45
 
 
 {-| Calculate number of all possible functions from domain to codomain
@@ -593,3 +615,91 @@ countIdempotent domain codomain =
         List.range 1 domain
             |> List.map (\k -> binomial domain k * k ^ (domain - k))
             |> List.sum
+
+
+
+-- CSS styles for the application
+
+
+styles : String
+styles =
+    """
+* {
+    box-sizing: border-box;
+}
+
+.app-container {
+    font-family: sans-serif;
+    max-width: 1000px;
+    margin: 0 auto;
+    padding: 10px;
+}
+
+.header {
+    margin-bottom: 15px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #ccc;
+}
+
+.main-content {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 15px;
+}
+
+.controls-panel {
+    flex: 1 1 300px;
+}
+
+.visualization-panel {
+    flex: 1 1 400px;
+}
+
+.control-group {
+    margin-bottom: 15px;
+    padding: 10px;
+    border: 1px solid #ccc;
+}
+
+.section-header {
+    margin: 5px 0;
+}
+
+.input-container {
+    display: flex;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.input-label {
+    flex: 0 0 120px;
+}
+
+.function-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.function-button {
+    width: 90px;
+    padding: 2px 5px;
+}
+
+.mapping-row {
+    display: flex;
+    margin-bottom: 4px;
+    align-items: center;
+}
+
+.mapping-label {
+    flex: 0 0 55px;
+    text-align: right;
+    padding-right: 5px;
+}
+
+.svg-container {
+    padding: 10px;
+    border: 1px solid #ccc;
+}
+    """
