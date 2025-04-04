@@ -123,48 +123,67 @@ update msg model =
 
 
 view : Model -> Html Msg
-view model =
+view ({ domain, codomain } as model) =
     Html.div []
         [ Html.h1 [] [ Html.text "Function Mapping App" ]
-        , setSizeInput "Domain size: " model.domain UpdateDomain
-        , setSizeInput "Codomain size: " model.codomain UpdateCodomain
-        , Html.text "Generate function: "
-        , Html.button [ E.onClick GenFunction ] [ Html.text "Any" ]
-        , Html.button
-            [ E.onClick GenInjective
-            , A.disabled (model.domain > model.codomain)
-            , A.title <|
-                if model.domain > model.codomain then
+        , setSizeInput "Domain size: " domain UpdateDomain
+        , setSizeInput "Codomain size: " codomain UpdateCodomain
+        , Html.div []
+            [ Html.div [] [ Html.text "Generate function:" ]
+            , Html.div
+                [ A.style "display" "flex"
+                , A.style "flex-direction" "column"
+                , A.style "gap" "8px"
+                , A.style "margin-left" "10px"
+                ]
+                [ viewFunctionButton "Any"
+                    GenFunction
+                    False
+                    ""
+                    (countAllFunctions domain codomain)
+                , viewFunctionButton "Injective"
+                    GenInjective
+                    (domain > codomain)
                     "There are no injective functions when the domain is larger than the codomain"
-
-                else
-                    "Generate random injective function"
-            ]
-            [ Html.text "Injective" ]
-        , Html.button
-            [ E.onClick GenSurjective
-            , A.disabled (model.domain < model.codomain)
-            , A.title <|
-                if model.domain < model.codomain then
+                    (countInjective domain codomain)
+                , viewFunctionButton "Surjective"
+                    GenSurjective
+                    (domain < codomain)
                     "There are no surjective functions when the domain is smaller than the codomain"
-
-                else
-                    "Generate random surjective function"
-            ]
-            [ Html.text "Surjective" ]
-        , Html.button
-            [ E.onClick GenBijective
-            , A.disabled (model.domain /= model.codomain)
-            , A.title <|
-                if model.domain /= model.codomain then
+                    (countSurjective domain codomain)
+                , viewFunctionButton "Bijective"
+                    GenBijective
+                    (domain /= codomain)
                     "Bijective functions only exist when the domain and codomain have the same size"
+                    (countBijective domain codomain)
+                ]
+            ]
+        , Html.div [ A.style "margin-top" "20px" ]
+            (Html.div [] [ Html.text "Mappings:" ]
+                :: List.indexedMap (viewMapping model) (Array.toList model.mappings)
+            )
+        , viewSvgMapping model
+        ]
+
+
+viewFunctionButton : String -> Msg -> Bool -> String -> Int -> Html Msg
+viewFunctionButton label msg isDisabled disabledTitle count =
+    Html.div []
+        [ Html.button
+            [ E.onClick msg
+            , A.disabled isDisabled
+            , A.title <|
+                if isDisabled then
+                    disabledTitle
 
                 else
-                    "Generate random bijective function"
+                    "Generate random " ++ String.toLower label ++ " function"
+            , A.style "min-width" "80px"
             ]
-            [ Html.text "Bijective" ]
-        , Html.div [] (List.indexedMap (viewMapping model) (Array.toList model.mappings))
-        , viewSvgMapping model
+            [ Html.text label ]
+        , Html.span
+            [ A.style "margin-left" "5px" ]
+            [ Html.text (" (" ++ String.fromInt count ++ ")") ]
         ]
 
 
@@ -320,6 +339,98 @@ circleRadius =
 gridUnit : Int
 gridUnit =
     50
+
+
+{-| Calculate number of all possible functions from domain to codomain
+-}
+countAllFunctions : Int -> Int -> Int
+countAllFunctions domain codomain =
+    codomain ^ domain
+
+
+{-| Calculate number of injective functions from domain to codomain
+-}
+countInjective : Int -> Int -> Int
+countInjective domain codomain =
+    if domain > codomain then
+        0
+
+    else
+        List.range 0 (domain - 1)
+            |> List.foldl (\i acc -> acc * (codomain - i)) 1
+
+
+{-| Calculate number of surjective functions from domain to codomain
+-}
+countSurjective : Int -> Int -> Int
+countSurjective domain codomain =
+    if domain < codomain then
+        0
+
+    else if domain == 0 && codomain == 0 then
+        1
+
+    else if codomain == 0 then
+        0
+
+    else
+        List.range 1 codomain
+            |> List.foldl
+                (\k acc ->
+                    acc + (-1 ^ (codomain - k)) * binomial codomain k * (k ^ domain)
+                )
+                0
+
+
+{-| Calculate number of bijective functions (permutations) for equal-sized sets
+-}
+countBijective : Int -> Int -> Int
+countBijective domain codomain =
+    if domain /= codomain then
+        0
+
+    else
+        factorial domain
+
+
+{-| Calculate factorial of n (n!)
+-}
+factorial : Int -> Int
+factorial n =
+    if n <= 1 then
+        1
+
+    else
+        List.range 1 n |> List.product
+
+
+{-| Calculate binomial coefficient (n choose k)
+Uses an iterative approach to avoid large factorial calculations
+and potential overflows, also applies the symmetry property: C(n,k) = C(n,n-k)
+-}
+binomial : Int -> Int -> Int
+binomial n k =
+    if k < 0 || k > n then
+        0
+
+    else if k == 0 || k == n then
+        1
+
+    else
+        -- Use symmetry to reduce number of multiplications needed
+        let
+            k_ =
+                min k (n - k)
+        in
+        List.range 1 k_
+            |> List.foldl
+                (\i ( numerator, denominator ) ->
+                    ( numerator * (n - i + 1)
+                    , denominator * i
+                    )
+                )
+                ( 1, 1 )
+            |> (\( numerator, denominator ) -> numerator // denominator)
 
 
 genInjective : Int -> Int -> Random.Generator (List Int)
