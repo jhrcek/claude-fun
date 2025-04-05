@@ -5,11 +5,13 @@ import Browser
 import Html exposing (Html)
 import Html.Attributes as A
 import Html.Events as E
+import Json.Decode as Decode exposing (Decoder)
 import List.Extra
 import Random
 import Random.List
 import Svg exposing (Svg)
 import Svg.Attributes as SA
+import Svg.Events as SE
 
 
 main : Program () Model Msg
@@ -26,6 +28,13 @@ type alias Model =
     { domain : Int
     , codomain : Int
     , mappings : Array Int
+    , dragState : Maybe DragState
+    }
+
+
+type alias DragState =
+    { domainElement : Int
+    , currentPosition : Maybe ( Int, Int )
     }
 
 
@@ -38,6 +47,7 @@ init _ =
     ( { domain = domain
       , codomain = 4
       , mappings = Array.repeat domain 0
+      , dragState = Nothing
       }
     , Cmd.none
     )
@@ -49,6 +59,10 @@ type Msg
     | UpdateMapping Int String
     | Generate FunctionProperty
     | NewRandomMapping (List Int)
+    | DragStart Int
+    | DragOver Int Int
+    | DragEnd Int Int
+    | RemoveMapping Int
 
 
 type FunctionProperty
@@ -169,6 +183,44 @@ update msg model =
         NewRandomMapping randomList ->
             ( { model | mappings = Array.fromList randomList }, Cmd.none )
 
+        DragStart domainElement ->
+            ( { model | dragState = Just { domainElement = domainElement, currentPosition = Nothing } }
+            , Cmd.none
+            )
+
+        DragOver mouseX mouseY ->
+            ( case model.dragState of
+                Just dragState ->
+                    { model | dragState = Just { dragState | currentPosition = Just ( mouseX, mouseY ) } }
+
+                Nothing ->
+                    model
+            , Cmd.none
+            )
+
+        DragEnd mouseX mouseY ->
+            ( case model.dragState of
+                Just dragState ->
+                    case findTargetCodomainElement mouseX mouseY model.codomain of
+                        Just element ->
+                            { model
+                                | mappings = Array.set (dragState.domainElement - 1) element model.mappings
+                                , dragState = Nothing
+                            }
+
+                        Nothing ->
+                            { model | dragState = Nothing }
+
+                Nothing ->
+                    model
+            , Cmd.none
+            )
+
+        RemoveMapping domainElement ->
+            ( { model | mappings = Array.set (domainElement - 1) 0 model.mappings }
+            , Cmd.none
+            )
+
 
 view : Model -> Html Msg
 view ({ domain, codomain } as model) =
@@ -275,26 +327,70 @@ viewSvgMapping model =
             (domainCodomainGridDist + 1) * gridUnit
 
         svgHeight =
-            (2 + max model.domain model.codomain) * gridUnit
+            (1 + max model.domain model.codomain) * gridUnit
 
         domainCircles =
             List.range 1 model.domain
-                |> List.map (\i -> viewCircle (Array.get (i - 1) model.mappings == Just 0) 1 i)
+                |> List.map (\i -> viewDomainCircle model i (Array.get (i - 1) model.mappings == Just 0))
 
         codomainCircles =
             List.range 1 model.codomain
-                |> List.map (\i -> viewCircle False domainCodomainGridDist i)
+                |> List.map (viewCodomainCircle model)
 
         arrows =
-            Array.toList model.mappings
-                |> List.indexedMap (\i v -> viewArrow (i + 1) v)
+            Array.toIndexedList model.mappings
+                |> List.filter
+                    (\( i, v ) ->
+                        -- Don't show arrows for elements whose mapping is not specified
+                        (v /= 0)
+                            && -- Don't show arrow for dragged domain element
+                               (Just (i + 1) /= Maybe.map .domainElement model.dragState)
+                    )
+                |> List.map (\( i, v ) -> viewArrow (i + 1) v)
+
+        dragLine =
+            case model.dragState of
+                Just { domainElement, currentPosition } ->
+                    case currentPosition of
+                        Just ( x2, y2 ) ->
+                            let
+                                x1 =
+                                    gridUnit + circleRadius
+
+                                y1 =
+                                    domainElement * gridUnit
+                            in
+                            [ Svg.line
+                                [ SA.x1 (String.fromInt x1)
+                                , SA.y1 (String.fromInt y1)
+                                , SA.x2 (String.fromInt x2)
+                                , SA.y2 (String.fromInt y2)
+                                , SA.stroke "blue"
+                                , SA.strokeWidth "1.5"
+                                , SA.strokeDasharray "5,5"
+
+                                -- TODO add arrowhead, but why is it bigger than the arrowhead for static arrows?
+                                --, SA.markerEnd "url(#arrowhead)"
+                                ]
+                                []
+                            ]
+
+                        Nothing ->
+                            []
+
+                Nothing ->
+                    []
     in
     Html.div [ A.class "svg-container" ]
         [ Html.h2 [ A.class "section-header" ] [ Html.text "Function Visualization" ]
+        , Html.div [ A.class "instructions" ]
+            [ Html.text "Drag from domain to codomain to create mapping. Click on domain element to clear mapping." ]
         , Svg.svg
             [ SA.width (String.fromInt svgWidth)
             , SA.height (String.fromInt svgHeight)
             , SA.viewBox ("0 0 " ++ String.fromInt svgWidth ++ " " ++ String.fromInt svgHeight)
+            , onSvgMouseMove DragOver
+            , onSvgMouseUp DragEnd
             ]
             (Svg.defs []
                 [ Svg.marker
@@ -310,70 +406,186 @@ viewSvgMapping model =
                 :: domainCircles
                 ++ codomainCircles
                 ++ arrows
+                ++ dragLine
             )
         ]
 
 
-viewCircle : Bool -> Int -> Int -> Svg msg
-viewCircle isHighlighted gridX gridY =
-    Svg.g []
+viewArrow : Int -> Int -> Svg msg
+viewArrow from to =
+    let
+        x1 =
+            gridUnit + circleRadius
+
+        x2 =
+            domainCodomainGridDist * gridUnit - circleRadius
+
+        y1 =
+            from * gridUnit
+
+        y2 =
+            to * gridUnit
+    in
+    Svg.line
+        [ SA.x1 (String.fromInt x1)
+        , SA.y1 (String.fromInt y1)
+        , SA.x2 (String.fromInt x2)
+        , SA.y2 (String.fromInt y2)
+        , SA.stroke "black"
+        , SA.markerEnd "url(#arrowhead)"
+        ]
+        []
+
+
+viewDomainCircle : Model -> Int -> Bool -> Svg Msg
+viewDomainCircle model domainElement isUnmapped =
+    let
+        x =
+            gridUnit
+
+        y =
+            domainElement * gridUnit
+
+        isDragging =
+            model.dragState
+                |> Maybe.map (\ds -> ds.domainElement == domainElement)
+                |> Maybe.withDefault False
+
+        fill =
+            if isDragging then
+                -- Light blue when dragging
+                "#e6f7ff"
+
+            else if isUnmapped then
+                -- Light red when unmapped
+                "#ffe6e6"
+
+            else
+                -- White for mapped elements
+                "#fff"
+    in
+    Svg.g
+        [ onSvgMouseDown (DragStart domainElement)
+        , SE.onClick (RemoveMapping domainElement)
+        ]
         [ Svg.circle
-            [ SA.cx <| String.fromInt <| gridX * gridUnit
-            , SA.cy <| String.fromInt <| gridY * gridUnit
+            [ SA.cx (String.fromInt x)
+            , SA.cy (String.fromInt y)
             , SA.r (String.fromInt circleRadius)
-            , SA.fill "#fff"
+            , SA.fill fill
             , SA.strokeWidth "1"
             , SA.stroke <|
-                if isHighlighted then
+                if isUnmapped then
                     "red"
+
+                else if isDragging then
+                    "blue"
 
                 else
                     "black"
+            , SA.cursor "grab"
             ]
             []
         , Svg.text_
-            [ SA.x <| String.fromInt <| gridX * gridUnit
-            , SA.y <| String.fromInt <| gridY * gridUnit
+            [ SA.x (String.fromInt x)
+            , SA.y (String.fromInt y)
             , SA.textAnchor "middle"
             , SA.dominantBaseline "central"
             , SA.fontFamily "sans-serif"
             , SA.fontSize "12px"
             , SA.fill "black"
             ]
-            [ Svg.text (String.fromInt gridY) ]
+            [ Svg.text (String.fromInt domainElement) ]
         ]
 
 
-viewArrow : Int -> Int -> Svg msg
-viewArrow from to =
-    if to == 0 then
-        -- Don't draw an arrow for unspecified mappings
-        Svg.g [] []
+viewCodomainCircle : Model -> Int -> Svg Msg
+viewCodomainCircle model codomainElement =
+    let
+        x =
+            domainCodomainGridDist * gridUnit
 
-    else
-        let
-            x1 =
-                gridUnit + circleRadius
+        y =
+            codomainElement * gridUnit
 
-            x2 =
-                domainCodomainGridDist * gridUnit - circleRadius
-
-            y1 =
-                from * gridUnit
-
-            y2 =
-                to * gridUnit
-        in
-        Svg.line
-            [ SA.x1 (String.fromInt x1)
-            , SA.y1 (String.fromInt y1)
-            , SA.x2 (String.fromInt x2)
-            , SA.y2 (String.fromInt y2)
-            , SA.stroke "black"
+        isDragTarget =
+            model.dragState /= Nothing
+    in
+    Svg.g []
+        [ Svg.circle
+            [ SA.cx (String.fromInt x)
+            , SA.cy (String.fromInt y)
+            , SA.r (String.fromInt circleRadius)
+            , SA.fill "transparent"
             , SA.strokeWidth "1"
-            , SA.markerEnd "url(#arrowhead)"
+            , SA.stroke "black"
+            , SA.cursor
+                (if isDragTarget then
+                    "pointer"
+
+                 else
+                    "default"
+                )
             ]
             []
+        , Svg.text_
+            [ SA.x (String.fromInt x)
+            , SA.y (String.fromInt y)
+            , SA.textAnchor "middle"
+            , SA.dominantBaseline "central"
+            , SA.fontFamily "sans-serif"
+            , SA.fontSize "12px"
+            , SA.fill "black"
+            ]
+            [ Svg.text (String.fromInt codomainElement) ]
+        ]
+
+
+onSvgMouseDown : Msg -> Svg.Attribute Msg
+onSvgMouseDown msg =
+    SE.on "mousedown" (Decode.succeed msg)
+
+
+onSvgMouseUp : (Int -> Int -> Msg) -> Svg.Attribute Msg
+onSvgMouseUp toMsg =
+    SE.on "mouseup" (decodeMousePosition toMsg)
+
+
+onSvgMouseMove : (Int -> Int -> Msg) -> Svg.Attribute Msg
+onSvgMouseMove toMsg =
+    SE.on "mousemove" (decodeMousePosition toMsg)
+
+
+decodeMousePosition : (Int -> Int -> msg) -> Decoder msg
+decodeMousePosition toMsg =
+    Decode.map2 toMsg
+        (Decode.field "offsetX" Decode.int)
+        (Decode.field "offsetY" Decode.int)
+
+
+findTargetCodomainElement : Int -> Int -> Int -> Maybe Int
+findTargetCodomainElement mouseX mouseY codomainSize =
+    let
+        -- The X coordinate must be near the codomain column to be considered a valid target
+        codomainX =
+            domainCodomainGridDist * gridUnit
+
+        isNearCodomainColumn =
+            abs (mouseX - codomainX) <= (circleRadius + 5)
+
+        -- If in the correct X range, calculate which element we're near based on Y coordinate
+        potentialElement =
+            round (toFloat mouseY / toFloat gridUnit)
+
+        -- Only consider it a match if we're close enough to a codomain element
+        isValidCodomainElement =
+            1 <= potentialElement && potentialElement <= codomainSize
+    in
+    if isNearCodomainColumn && isValidCodomainElement then
+        Just potentialElement
+
+    else
+        Nothing
 
 
 maxSetSize : Int
@@ -568,7 +780,6 @@ genIdempotent size =
                             |> Random.andThen
                                 (\( fixedPoints, nonFixedPoints ) ->
                                     let
-                                        -- Create the mappings for fixed points (x -> x)
                                         fixedPointMappings =
                                             List.map (\x -> ( x, x )) fixedPoints
 
@@ -615,10 +826,6 @@ countIdempotent domain codomain =
         List.range 1 domain
             |> List.map (\k -> binomial domain k * k ^ (domain - k))
             |> List.sum
-
-
-
--- CSS styles for the application
 
 
 styles : String
@@ -701,5 +908,14 @@ styles =
 .svg-container {
     padding: 10px;
     border: 1px solid #ccc;
+    user-select: none;
+    touch-action: none;
+}
+
+.instructions {
+    font-size: 12px;
+    margin-bottom: 8px;
+    color: #555;
+    font-style: italic;
 }
     """
