@@ -71,6 +71,24 @@ mkTotal r =
             )
 
 
+{-| compose f g == g ∘ f
+-}
+compose : TotalFunction -> TotalFunction -> TotalFunction
+compose (TotalFunction f) (TotalFunction g) =
+    TotalFunction
+        { domain = f.domain
+        , codomain = g.codomain
+        , mappings =
+            Array.map
+                (\i ->
+                    Array.get (i - 1) g.mappings
+                        |> Maybe.andThen (\fi -> Array.get (fi - 1) f.mappings)
+                        |> Maybe.withDefault 0
+                )
+                f.mappings
+        }
+
+
 init : () -> ( Model, Cmd Msg )
 init _ =
     let
@@ -287,6 +305,11 @@ isBijective ((TotalFunction f) as tf) =
         isInjective tf && isSurjective tf
 
 
+isIdempotent : TotalFunction -> Bool
+isIdempotent ((TotalFunction f) as tf) =
+    f.domain == f.codomain && compose tf tf == tf
+
+
 {-| Count how many sections exist for current function.
 A section s of a function f: X → Y is a function s: Y → X such that f ∘ s = idY
 -}
@@ -408,6 +431,10 @@ viewFunctionStats model =
             , Html.div [ A.class "stats-row" ]
                 [ Html.span [ A.class "stats-property" ] [ Html.text "Bijective:" ]
                 , Html.span [] [ Html.text (viewStat (isBijective >> boolToStr)) ]
+                ]
+            , Html.div [ A.class "stats-row" ]
+                [ Html.span [ A.class "stats-property" ] [ Html.text "Idempotent:" ]
+                , Html.span [] [ Html.text (viewStat (isIdempotent >> boolToStr)) ]
                 ]
             , Html.div [ A.class "stats-row" ]
                 [ Html.span [ A.class "stats-property" ] [ Html.text "Number of sections:" ]
