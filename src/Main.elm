@@ -1,7 +1,9 @@
 module Main exposing (main)
 
 import Array exposing (Array)
+import Array.Extra
 import Browser
+import Dict
 import Html exposing (Html)
 import Html.Attributes as A
 import Html.Events as E
@@ -36,6 +38,37 @@ type alias DragState =
     { domainElement : Int
     , currentPosition : Maybe ( Int, Int )
     }
+
+
+{-| Function without any undefined mappings (0s within the array)
+-}
+type TotalFunction
+    = TotalFunction
+        { domain : Int
+        , codomain : Int
+        , mappings : Array Int
+        }
+
+
+mkTotal :
+    { r
+        | domain : Int
+        , codomain : Int
+        , mappings : Array Int
+    }
+    -> Maybe TotalFunction
+mkTotal r =
+    if Array.Extra.any (\e -> e == 0) r.mappings then
+        Nothing
+
+    else
+        Just
+            (TotalFunction
+                { domain = r.domain
+                , codomain = r.codomain
+                , mappings = r.mappings
+                }
+            )
 
 
 init : () -> ( Model, Cmd Msg )
@@ -222,6 +255,86 @@ update msg model =
             )
 
 
+isInjective : TotalFunction -> Bool
+isInjective (TotalFunction r) =
+    let
+        mappingList =
+            Array.toList r.mappings
+
+        uniqueMappedValues =
+            List.Extra.unique mappingList
+    in
+    List.length mappingList == List.length uniqueMappedValues
+
+
+isSurjective : TotalFunction -> Bool
+isSurjective (TotalFunction f) =
+    let
+        mappedValues =
+            Array.toList f.mappings
+                |> List.Extra.unique
+                |> List.sort
+    in
+    List.length mappedValues == f.codomain
+
+
+isBijective : TotalFunction -> Bool
+isBijective ((TotalFunction f) as tf) =
+    if f.domain /= f.codomain then
+        False
+
+    else
+        isInjective tf && isSurjective tf
+
+
+{-| Count how many sections exist for current function.
+A section s of a function f: X → Y is a function s: Y → X such that f ∘ s = idY
+-}
+countSections : TotalFunction -> Int
+countSections ((TotalFunction f) as tf) =
+    if isSurjective tf then
+        Array.foldl
+            (\e ->
+                Dict.update e
+                    (\mCount ->
+                        case mCount of
+                            Nothing ->
+                                Just 1
+
+                            Just c ->
+                                Just (c + 1)
+                    )
+            )
+            Dict.empty
+            f.mappings
+            |> Dict.values
+            |> List.product
+
+    else
+        -- Non-surjective functions have no sections
+        0
+
+
+{-| Count how many retractions exist for given function.
+A retraction r of a function f: X → Y is a function r: Y → X such that r ∘ f = idX
+-}
+countRetractions : TotalFunction -> Int
+countRetractions ((TotalFunction r) as tf) =
+    if isInjective tf then
+        let
+            unmappedCodomainElems =
+                Array.toList r.mappings
+                    |> List.Extra.unique
+                    |> List.length
+                    |> (\mappedCount -> r.codomain - mappedCount)
+        in
+        r.domain ^ unmappedCodomainElems
+
+    else
+        -- Non-injective functions have no retractions
+        0
+
+
 view : Model -> Html Msg
 view ({ domain, codomain } as model) =
     Html.div [ A.class "app-container" ]
@@ -248,9 +361,63 @@ view ({ domain, codomain } as model) =
                     ]
                 ]
             , Html.div [ A.class "visualization-panel" ]
-                [ viewSvgMapping model ]
+                [ viewSvgMapping model
+                , viewFunctionStats model
+                ]
             ]
         , Html.node "style" [] [ Html.text styles ]
+        ]
+
+
+viewFunctionStats : Model -> Html msg
+viewFunctionStats model =
+    let
+        mTotal =
+            mkTotal model
+
+        viewStat getStat =
+            case mTotal of
+                Nothing ->
+                    "N/A"
+
+                Just totalFunction ->
+                    getStat totalFunction
+
+        boolToStr : Bool -> String
+        boolToStr b =
+            if b then
+                "Yes"
+
+            else
+                "No"
+    in
+    Html.div [ A.class "function-stats" ]
+        [ Html.h2 [ A.class "section-header" ] [ Html.text "Function Stats" ]
+        , Html.div [ A.class "stats-container" ]
+            [ Html.div [ A.class "stats-row" ]
+                [ Html.span [ A.class "stats-label" ] [ Html.text "Properties:" ]
+                ]
+            , Html.div [ A.class "stats-row" ]
+                [ Html.span [ A.class "stats-property" ] [ Html.text "Injective:" ]
+                , Html.span [] [ Html.text (viewStat (isInjective >> boolToStr)) ]
+                ]
+            , Html.div [ A.class "stats-row" ]
+                [ Html.span [ A.class "stats-property" ] [ Html.text "Surjective:" ]
+                , Html.span [] [ Html.text (viewStat (isSurjective >> boolToStr)) ]
+                ]
+            , Html.div [ A.class "stats-row" ]
+                [ Html.span [ A.class "stats-property" ] [ Html.text "Bijective:" ]
+                , Html.span [] [ Html.text (viewStat (isBijective >> boolToStr)) ]
+                ]
+            , Html.div [ A.class "stats-row" ]
+                [ Html.span [ A.class "stats-property" ] [ Html.text "Number of sections:" ]
+                , Html.span [] [ Html.text (viewStat (countSections >> String.fromInt)) ]
+                ]
+            , Html.div [ A.class "stats-row" ]
+                [ Html.span [ A.class "stats-property" ] [ Html.text "Number of retractions:" ]
+                , Html.span [] [ Html.text (viewStat (countRetractions >> String.fromInt)) ]
+                ]
+            ]
         ]
 
 
@@ -917,5 +1084,29 @@ styles =
     margin-bottom: 8px;
     color: #555;
     font-style: italic;
+}
+
+.function-stats {
+    margin-top: 15px;
+    padding: 10px;
+    border: 1px solid #ccc;
+}
+
+.stats-container {
+    margin-left: 10px;
+}
+
+.stats-row {
+    margin-bottom: 5px;
+}
+
+.stats-label {
+    font-weight: bold;
+}
+
+.stats-property {
+    margin-left: 10px;
+    display: inline-block;
+    width: 170px;
 }
     """
